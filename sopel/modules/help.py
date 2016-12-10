@@ -4,7 +4,6 @@ help.py - Sopel Help Module
 Copyright 2008, Sean B. Palmer, inamidst.com
 Copyright © 2013, Elad Alfassa, <elad@fedoraproject.org>
 Licensed under the Eiffel Forum License 2.
-
 http://sopel.chat
 """
 from __future__ import unicode_literals, absolute_import, print_function, division
@@ -12,6 +11,7 @@ from __future__ import unicode_literals, absolute_import, print_function, divisi
 import textwrap
 import collections
 import json
+import subprocess
 
 import requests
 
@@ -102,15 +102,19 @@ def create_gist(bot, msg):
         bot.say("Sorry! Something went wrong.")
         logger.error("Invalid result %s", result)
         return
-    return result['html_url']
 
 
-@rule('$nick' r'(?i)help(?:[?!]+)?$')
+
+@rule('$nick' '(?i)(help|doc) +([A-Za-z]+)(?:\?+)?$')
+@example('.info')
+@commands('info')
 @priority('low')
-def help2(bot, trigger):
-    response = (
-        'Hi, I\'m a bot. Say ".commands" to me in private for a list ' +
-        'of my commands, or see http://sopel.chat for more ' +
-        'general details. My owner is %s.'
-    ) % bot.config.core.owner
-    bot.reply(response)
+def help(bot, trigger):
+    githash = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'])
+    bot.say("Stella - Revision #" + githash.rstrip("\n") + "- A bot created by Sofia, whose development is managed by #sapphire, however all final decisions are made by Princess Vi.")
+    bot.say("For a list of commands to be sent to you in PM, please use: '!command' with no parameters.")
+	
+@commands('version')
+def version(bot, trigger):
+	githash = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'])
+	bot.say("Stella - Revision #" + githash.rstrip("\n") + "")
