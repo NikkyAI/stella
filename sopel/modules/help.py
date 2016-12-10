@@ -25,7 +25,7 @@ logger = get_logger(__name__)
 @example('.help tell')
 @commands('help', 'commands')
 @priority('low')
-def help(bot, trigger):
+def f_help(bot, trigger):
     """Shows a command's documentation, and possibly an example."""
     if trigger.group(2):
         name = trigger.group(2)
@@ -70,9 +70,9 @@ def help(bot, trigger):
             if not url:
                 return
             bot.memory['command-gist'] = (len(bot.command_groups), url)
-        bot.say("I've posted a list of my commands at {} - You can see "
-                "more info about any of these commands by doing .help "
-                "<command> (e.g. .help time)".format(url))
+        bot.say("I've posted a list of my commands at {url} - You can see "
+                "more info about any of these commands by doing {help_prefix}help "
+                "<command> (e.g. {help_prefix}help time)".format(url=url, help_prefix=bot.config.core.help_prefix))
 
 
 def create_gist(bot, msg):
@@ -87,34 +87,36 @@ def create_gist(bot, msg):
     }
     try:
         result = requests.post('https://api.github.com/gists',
-                               data=json.dumps(payload))
+                               json=payload)
+        result.raise_for_status()
+    except requests.HTTPError as e:
+        bot.say("Sorry! Something went wrong.")
+        logger.error("Error %s posting commands gist: %s",
+                     e.response.status_code, e.response.text)
+        return
     except requests.RequestException:
         bot.say("Sorry! Something went wrong.")
         logger.exception("Error posting commands gist")
         return
-    if not result.status_code != '201':
-        bot.say("Sorry! Something went wrong.")
-        logger.error("Error %s posting commands gist: %s",
-                     result.status_code, result.text)
-        return
-    result = result.json()
-    if 'html_url' not in result:
+
+    result = result.json().get('files', {}).get('commands.txt', {}).get('raw_url')
+    if not result:
         bot.say("Sorry! Something went wrong.")
         logger.error("Invalid result %s", result)
         return
-
+    return result
 
 
 @rule('$nick' '(?i)(help|doc) +([A-Za-z]+)(?:\?+)?$')
 @example('.info')
 @commands('info')
 @priority('low')
-def help(bot, trigger):
+def info(bot, trigger):
     githash = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'])
     bot.say("Stella - Revision #" + githash.rstrip("\n") + "- A bot created by Sofia, whose development is managed by #sapphire, however all final decisions are made by Princess Vi.")
-    bot.say("For a list of commands to be sent to you in PM, please use: '!command' with no parameters.")
-	
+    bot.say("For a gist of commands, please use: '{help_prefix}commands' with no parameters.".format(help_prefix=bot.config.core.help_prefix))
+
 @commands('version')
 def version(bot, trigger):
-	githash = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'])
-	bot.say("Stella - Revision #" + githash.rstrip("\n") + "")
+    githash = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD'])
+    bot.say("Stella - Revision #" + githash.rstrip("\n") + "")

@@ -51,7 +51,18 @@ def f_time(bot, trigger):
     if trigger.group(2):
         zone = get_timezone(bot.db, bot.config, trigger.group(2).strip(), None, None)
         if not zone:
-            bot.say('Could not find timezone %s.' % trigger.group(2).strip())
+            zone = get_timezone(bot.db, bot.config, None, trigger.nick,
+                            trigger.sender)
+            if not zone:
+                bot.say('Could not find timezone {}.'.format(trigger.group(2).strip()))
+            else:
+                time = format_time(bot.db, bot.config, zone, trigger.nick, trigger.sender)
+                bot.say(time)
+                bot.say('{arg} is not a valid timezone '
+                        'or {arg} has not used .settz correctly '
+                        '\x02\x033.help settz\x0F, '
+                        'falling back to channel defaults'
+                        .format(arg=trigger.group(2).strip()))
             return
     else:
         zone = get_timezone(bot.db, bot.config, None, trigger.nick,

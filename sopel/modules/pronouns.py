@@ -50,8 +50,8 @@ def pronouns(bot, trigger):
             # gender, but like… it's a bot.
             # https://twitter.com/hopefulcyborg/status/728231494116773889
             bot.say(
-                "I am a bot. Beep boop. My pronouns are it/it/its/its/itself. "
-                "See http://pronoun.is/it for examples."
+                "I am a bot. Beep boop. My pronouns are she/her."
+                "See http://pronoun.is/she/her for examples."
             )
         else:
             bot.say("I don't know {}'s pronouns. They can set them with "
