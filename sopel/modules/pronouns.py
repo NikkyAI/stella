@@ -71,7 +71,6 @@ def say_pronouns(bot, nick, pronouns):
 @commands('setpronouns','setpronoun')
 @example('.setpronouns they/them/their/theirs/themselves')
 def set_pronouns(bot, trigger):
-
     if trigger.group(2):
         pronouns = trigger.group(2)    
         disambig = ''
