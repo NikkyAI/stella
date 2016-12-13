@@ -127,12 +127,14 @@ def guess_tz(bot, nick, date_string):
         bot.db.set_nick_value(nick, 'timezone', tz)
         if nick in response_channel:
             bot.say('set timezone of {nick} to {tz}'.format(**locals()), response_channel[nick])
+            time = format_time(bot.db, bot.config, tz, nick, response_channel[nick])
+            bot.say(time, response_channel[nick])
     else:
         if nick in response_channel:
-            bot.say('could not find a timezone for utc offset {utc_offset}'.format(**locals()), response_channel[nick])
+            bot.say('could not find {nick}\'s timezone for utc offset {utc_offset} make sure the client responds correctly to CTCP TIME with a datetime string'.format(**locals()), response_channel[nick])
 
 
-@rule('.*')
+@rule('.{5,}')
 @event('NOTICE')
 @intent('TIME')
 def receive_notice(bot, trigger):
@@ -148,13 +150,14 @@ def receive_notice(bot, trigger):
         return
 
 
-@rule(r"""\.guesstz
+@rule(r"""\.(?P<command>guesstz|guesstimezone)
           (?:
             \s+(?P<user>\S+)
             (?:\s+(?P<datestring>.+))?
           )?
        """)
 @example('.guesstz')
+# @commands('guesstz', 'guesstimezone') # when uncommenting this it seems to register and execute the command two or more times
 def guess(bot, trigger):
     user = trigger.group('user')
     if user:
@@ -180,24 +183,18 @@ def guess(bot, trigger):
 @example('.t America/New_York')
 def f_time(bot, trigger):
     """Returns the current time."""
-    if trigger.group(2):
-        zone = get_timezone(bot.db, bot.config, trigger.group(2).strip(), None, None)
-        if not zone:
-            zone = get_timezone(bot.db, bot.config, None, trigger.nick, trigger.sender)
-            if not zone:
-                bot.say('Could not find timezone {}.'.format(trigger.group(2).strip()))
-            else:
-                time = format_time(bot.db, bot.config, zone, trigger.nick, trigger.sender)
-                bot.say(time)
-                bot.say('{arg} is not a valid timezone '
-                        'or {arg} has not used .settz correctly '
-                        '\x02\x033.help settz\x0F, '
-                        'falling back to channel defaults'
-                        .format(arg=trigger.group(2).strip()))
-            return
-    else:
-        zone = get_timezone(bot.db, bot.config, None, trigger.nick,
-                            trigger.sender)
+    user = Identifier(trigger.group(2) or trigger.nick)
+    zone = get_timezone(bot.db, bot.config, user, None, None)
+    if not zone:
+        channel_time = format_time(bot.db, bot.config, zone, trigger.nick, trigger.sender)
+        bot.say('{user} is not a valid timezone '
+                'or {user} has not yet set a timezone '
+                '\x02\x033.help settz\x0F'
+                .format(**locals()))
+        response_channel[trigger.nick] = trigger.sender
+        bot.say('\001TIME\001', user)
+        bot.say('channeldefault = {channel_time}'.format(**locals()))
+        return
     time = format_time(bot.db, bot.config, zone, trigger.nick, trigger.sender)
     bot.say(time)
 
@@ -214,6 +211,9 @@ def update_user(bot, trigger):
     else:
         tz = trigger.group(2)
         if not tz:
+            response_channel[trigger.nick] = trigger.sender
+            bot.say('\001TIME\001', trigger.nick)
+
             bot.reply("What timezone do you want to set? Try one from "
                       "http://sopel.chat/tz")
             return
