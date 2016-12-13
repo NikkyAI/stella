@@ -4,16 +4,65 @@
 # Licensed under the Eiffel Forum License 2.
 from __future__ import unicode_literals, absolute_import, print_function, division
 
+from datetime import datetime, timedelta
+
+from pytz import LazySet
+
+from sopel.logger import get_logger
+from sopel.tools import Identifier
+
 try:
     import pytz
 except ImportError:
     pytz = None
 
-from sopel.module import commands, example, OP
+from sopel.module import commands, example, OP, rule, event, intent
+
 from sopel.tools.time import (
     get_timezone, format_time, validate_format, validate_timezone
 )
 from sopel.config.types import StaticSection, ValidatedAttribute
+import dateutil.parser
+
+LOGGER = get_logger(__name__)
+
+common_timezones_set = LazySet([
+    'Europe/London',
+    'Europe/Berlin',
+    'Africa/Cairo',
+    'Europe/Moscow',
+    'Asia/Dubai',
+    'Asia/Tehran',
+    'Indian/Maldives',
+    'Asia/Kabul',
+    'Antarctica/Vostok',
+    'Asia/Calcutta',
+    'Asia/Bangkok',
+    'Asia/Rangoon',
+    'Asia/Singapore',
+    'Asia/Tokyo',
+    'Asia/Pyongyang',
+    'Australia/Eucla',
+    'Australia/Queensland',
+    'Australia/North',
+    'Australia/Sydney',
+    'Australia/South',
+    'Pacific/Wallis',
+    'Pacific/Auckland',
+    'US/Hawaii',
+    'Pacific/Chatham',
+    'US/Alaska',
+    'Pacific/Marquesas',
+    'America/Los_Angeles',
+    'America/Phoenix',
+    'America/Chicago',
+    'America/New_York',
+    'Etc/GMT+4',
+    'Etc/GMT+3',
+    'Canada/Newfoundland',
+    'Etc/GMT+2',
+    'Etc/GMT+1',
+])
 
 
 class TimeSection(StaticSection):
@@ -44,29 +93,108 @@ def setup(bot):
     bot.config.define_section('clock', TimeSection)
 
 
+response_channel = {}
+
+
+def guess_tz(bot, nick, date_string):
+    try:
+        date = dateutil.parser.parse(date_string, fuzzy=True)
+    except ValueError:
+        LOGGER.error('cannot parse {nick}\'s date string {date_string}'.format(**locals()))
+        if nick in response_channel:
+            bot.say('cannot parse {nick}\'s date string {date_string}'.format(**locals()), response_channel[nick])
+        return
+
+    if not date.tzinfo:
+        date = pytz.utc.localize(date)
+        now = pytz.utc.localize(datetime.utcnow())
+        difference = date - now
+        minutes = int(round(difference.seconds / 60))
+        utc_offset = timedelta(
+            days=difference.days,
+            minutes=int(round((minutes / 15)) * 15))
+    else:
+        utc_offset = date.utcoffset()
+
+    name = None
+    now = datetime.now()
+    for tz in map(pytz.timezone, common_timezones_set):
+        if tz.utcoffset(now) == utc_offset:
+            name = tz.zone
+            break
+    if name:
+        tz = name
+        bot.db.set_nick_value(nick, 'timezone', tz)
+        if nick in response_channel:
+            bot.say('set timezone of {nick} to {tz}'.format(**locals()), response_channel[nick])
+            time = format_time(bot.db, bot.config, tz, nick, response_channel[nick])
+            bot.say(time, response_channel[nick])
+    else:
+        if nick in response_channel:
+            bot.say('could not find {nick}\'s timezone for utc offset {utc_offset} make sure the client responds correctly to CTCP TIME with a datetime string'.format(**locals()), response_channel[nick])
+
+
+@rule('.{5,}')
+@event('NOTICE')
+@intent('TIME')
+def receive_notice(bot, trigger):
+    datestring = trigger.group()
+    LOGGER.info('{trigger.nick}: NOTICE TIME {datestring}'.format(**locals()))
+    try:
+        user = Identifier(trigger.nick)
+        guess_tz(bot, user, datestring)
+    except Exception as e:
+        LOGGER.error('{e}'.format(**locals()))
+        if trigger.nick in response_channel:
+            bot.say('cannot parse {nick}\'s date string {date_string}'.format(**locals()), response_channel[trigger.nick])
+        return
+
+
+@rule(r"""\.(?P<command>guesstz|guesstimezone)
+          (?:
+            \s+(?P<user>\S+)
+            (?:\s+(?P<datestring>.+))?
+          )?
+       """)
+@example('.guesstz')
+# @commands('guesstz', 'guesstimezone') # when uncommenting this it seems to register and execute the command two or more times
+def guess(bot, trigger):
+    user = trigger.group('user')
+    if user:
+        if not trigger.admin:
+            bot.say('admin privileges required')
+            return
+        user = Identifier(user)
+        datestring = trigger.group('datestring')
+        if datestring:
+            response_channel[user] = trigger.sender
+            try:
+                guess_tz(bot, user, datestring)
+            except Exception as e:
+                bot.say('{e}'.format(**locals()))
+            return
+    user = user or Identifier(trigger.nick)
+    response_channel[user] = trigger.sender
+    bot.say('sending CTCP TIME to {user}'.format(**locals()))
+    bot.say('\001TIME\001', user)
+
+
 @commands('t', 'time')
 @example('.t America/New_York')
 def f_time(bot, trigger):
     """Returns the current time."""
-    if trigger.group(2):
-        zone = get_timezone(bot.db, bot.config, trigger.group(2).strip(), None, None)
-        if not zone:
-            zone = get_timezone(bot.db, bot.config, None, trigger.nick,
-                            trigger.sender)
-            if not zone:
-                bot.say('Could not find timezone {}.'.format(trigger.group(2).strip()))
-            else:
-                time = format_time(bot.db, bot.config, zone, trigger.nick, trigger.sender)
-                bot.say(time)
-                bot.say('{arg} is not a valid timezone '
-                        'or {arg} has not used .settz correctly '
-                        '\x02\x033.help settz\x0F, '
-                        'falling back to channel defaults'
-                        .format(arg=trigger.group(2).strip()))
-            return
-    else:
-        zone = get_timezone(bot.db, bot.config, None, trigger.nick,
-                            trigger.sender)
+    user = Identifier(trigger.group(2) or trigger.nick)
+    zone = get_timezone(bot.db, bot.config, user, None, None)
+    if not zone:
+        channel_time = format_time(bot.db, bot.config, zone, trigger.nick, trigger.sender)
+        bot.say('{user} is not a valid timezone '
+                'or {user} has not yet set a timezone '
+                '\x02\x033.help settz\x0F'
+                .format(**locals()))
+        response_channel[trigger.nick] = trigger.sender
+        bot.say('\001TIME\001', user)
+        bot.say('channeldefault = {channel_time}'.format(**locals()))
+        return
     time = format_time(bot.db, bot.config, zone, trigger.nick, trigger.sender)
     bot.say(time)
 
@@ -83,6 +211,9 @@ def update_user(bot, trigger):
     else:
         tz = trigger.group(2)
         if not tz:
+            response_channel[trigger.nick] = trigger.sender
+            bot.say('\001TIME\001', trigger.nick)
+
             bot.reply("What timezone do you want to set? Try one from "
                       "http://sopel.chat/tz")
             return
@@ -168,10 +299,10 @@ def get_user_format(bot, trigger):
     nick = nick.strip()
 
     # Get old format as back-up
-    format = bot.db.get_nick_value(nick, 'time_format')
+    fmt = bot.db.get_nick_value(nick, 'time_format')
 
-    if format:
-        bot.say("%s's time format: %s." % (nick, format))
+    if fmt:
+        bot.say("%s's time format: %s." % (nick, fmt))
     else:
         bot.say("%s hasn't set a custom time format" % nick)
 
