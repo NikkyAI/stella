@@ -51,8 +51,7 @@ def f_time(bot, trigger):
     if trigger.group(2):
         zone = get_timezone(bot.db, bot.config, trigger.group(2).strip(), None, None)
         if not zone:
-            zone = get_timezone(bot.db, bot.config, None, trigger.nick,
-                            trigger.sender)
+            zone = get_timezone(bot.db, bot.config, None, trigger.nick, trigger.sender)
             if not zone:
                 bot.say('Could not find timezone {}.'.format(trigger.group(2).strip()))
             else:
@@ -168,10 +167,10 @@ def get_user_format(bot, trigger):
     nick = nick.strip()
 
     # Get old format as back-up
-    format = bot.db.get_nick_value(nick, 'time_format')
+    fmt = bot.db.get_nick_value(nick, 'time_format')
 
-    if format:
-        bot.say("%s's time format: %s." % (nick, format))
+    if fmt:
+        bot.say("%s's time format: %s." % (nick, fmt))
     else:
         bot.say("%s hasn't set a custom time format" % nick)
 
