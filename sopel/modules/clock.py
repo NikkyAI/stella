@@ -4,16 +4,65 @@
 # Licensed under the Eiffel Forum License 2.
 from __future__ import unicode_literals, absolute_import, print_function, division
 
+from datetime import datetime, timedelta
+
+from pytz import LazySet
+
+from sopel.logger import get_logger
+from sopel.tools import Identifier
+
 try:
     import pytz
 except ImportError:
     pytz = None
 
-from sopel.module import commands, example, OP
+from sopel.module import commands, example, OP, rule, event, intent
+
 from sopel.tools.time import (
     get_timezone, format_time, validate_format, validate_timezone
 )
 from sopel.config.types import StaticSection, ValidatedAttribute
+import dateutil.parser
+
+LOGGER = get_logger(__name__)
+
+common_timezones_set = LazySet([
+    'Europe/London',
+    'Europe/Berlin',
+    'Africa/Cairo',
+    'Europe/Moscow',
+    'Asia/Dubai',
+    'Asia/Tehran',
+    'Indian/Maldives',
+    'Asia/Kabul',
+    'Antarctica/Vostok',
+    'Asia/Calcutta',
+    'Asia/Bangkok',
+    'Asia/Rangoon',
+    'Asia/Singapore',
+    'Asia/Tokyo',
+    'Asia/Pyongyang',
+    'Australia/Eucla',
+    'Australia/Queensland',
+    'Australia/North',
+    'Australia/Sydney',
+    'Australia/South',
+    'Pacific/Wallis',
+    'Pacific/Auckland',
+    'US/Hawaii',
+    'Pacific/Chatham',
+    'US/Alaska',
+    'Pacific/Marquesas',
+    'America/Los_Angeles',
+    'America/Phoenix',
+    'America/Chicago',
+    'America/New_York',
+    'Etc/GMT+4',
+    'Etc/GMT+3',
+    'Canada/Newfoundland',
+    'Etc/GMT+2',
+    'Etc/GMT+1',
+])
 
 
 class TimeSection(StaticSection):
@@ -42,6 +91,89 @@ def configure(config):
 
 def setup(bot):
     bot.config.define_section('clock', TimeSection)
+
+
+response_channel = {}
+
+
+def guess_tz(bot, nick, date_string):
+    try:
+        date = dateutil.parser.parse(date_string, fuzzy=True)
+    except ValueError:
+        LOGGER.error('cannot parse {nick}\'s date string {date_string}'.format(**locals()))
+        if nick in response_channel:
+            bot.say('cannot parse {nick}\'s date string {date_string}'.format(**locals()), response_channel[nick])
+        return
+
+    if not date.tzinfo:
+        date = pytz.utc.localize(date)
+        now = pytz.utc.localize(datetime.utcnow())
+        difference = date - now
+        minutes = int(round(difference.seconds / 60))
+        utc_offset = timedelta(
+            days=difference.days,
+            minutes=int(round((minutes / 15)) * 15))
+    else:
+        utc_offset = date.utcoffset()
+
+    name = None
+    now = datetime.now()
+    for tz in map(pytz.timezone, common_timezones_set):
+        if tz.utcoffset(now) == utc_offset:
+            name = tz.zone
+            break
+    if name:
+        tz = name
+        bot.db.set_nick_value(nick, 'timezone', tz)
+        if nick in response_channel:
+            bot.say('set timezone of {nick} to {tz}'.format(**locals()), response_channel[nick])
+    else:
+        if nick in response_channel:
+            bot.say('could not find a timezone for utc offset {utc_offset}'.format(**locals()), response_channel[nick])
+
+
+@rule('.*')
+@event('NOTICE')
+@intent('TIME')
+def receive_notice(bot, trigger):
+    datestring = trigger.group()
+    LOGGER.info('{trigger.nick}: NOTICE TIME {datestring}'.format(**locals()))
+    try:
+        user = Identifier(trigger.nick)
+        guess_tz(bot, user, datestring)
+    except Exception as e:
+        LOGGER.error('{e}'.format(**locals()))
+        if trigger.nick in response_channel:
+            bot.say('cannot parse {nick}\'s date string {date_string}'.format(**locals()), response_channel[trigger.nick])
+        return
+
+
+@rule(r"""\.guesstz
+          (?:
+            \s+(?P<user>\S+)
+            (?:\s+(?P<datestring>.+))?
+          )?
+       """)
+@example('.guesstz')
+def guess(bot, trigger):
+    user = trigger.group('user')
+    if user:
+        if not trigger.admin:
+            bot.say('admin privileges required')
+            return
+        user = Identifier(user)
+        datestring = trigger.group('datestring')
+        if datestring:
+            response_channel[user] = trigger.sender
+            try:
+                guess_tz(bot, user, datestring)
+            except Exception as e:
+                bot.say('{e}'.format(**locals()))
+            return
+    user = user or Identifier(trigger.nick)
+    response_channel[user] = trigger.sender
+    bot.say('sending CTCP TIME to {user}'.format(**locals()))
+    bot.say('\001TIME\001', user)
 
 
 @commands('t', 'time')
