@@ -6,7 +6,7 @@ from __future__ import unicode_literals, absolute_import, print_function, divisi
 
 from datetime import datetime, timedelta
 
-from pytz import LazySet
+from pytz.lazy import LazySet
 
 from sopel.logger import get_logger
 from sopel.tools import Identifier
