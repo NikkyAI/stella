@@ -9,7 +9,7 @@ this module adds quoting and retrieving quotes
 # from __future__ import unicode_literals
 import re
 
-import cPickle
+import pickle
 
 from sopel.config import StaticSection
 from sopel.config.types import FilenameAttribute
