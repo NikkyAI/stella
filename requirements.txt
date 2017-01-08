@@ -1,4 +1,4 @@
-dateutil
+python-dateutil
 xmltodict
 pytz
 praw
